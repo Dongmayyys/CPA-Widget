@@ -559,6 +559,7 @@ actor CLIProxyAPIQuotaClient: QuotaFetchingClient {
         _ groups: [[String: Any]]
     ) -> [QuotaWindow] {
         var entries: [String: [(remaining: Double, resetTime: Date?, duration: TimeInterval?)]] = [:]
+        var descriptors: [String: (label: String, duration: TimeInterval?)] = [:]
 
         for group in groups {
             guard let kind = antigravityGroupKind(group) else { continue }
@@ -570,30 +571,27 @@ actor CLIProxyAPIQuotaClient: QuotaFetchingClient {
                 ) else {
                     continue
                 }
-                entries[kind, default: []].append((
+                let descriptor = antigravityWindowDescriptor(
+                    bucket["window"] ?? bucket["window_type"] ?? bucket["period"]
+                )
+                let key = "\(kind)-\(descriptor.key)"
+                descriptors[key] = (descriptor.label, descriptor.duration)
+                entries[key, default: []].append((
                     remaining: clamp(fraction * 100),
                     resetTime: date(bucket["resetTime"] ?? bucket["reset_time"]),
-                    duration: antigravityDuration(bucket["window"])
+                    duration: descriptor.duration
                 ))
             }
         }
 
-        return ["gemini", "claude-gpt"].compactMap { kind in
-            guard let values = entries[kind], !values.isEmpty else { return nil }
-            return QuotaWindow(
-                id: "antigravity-\(kind)",
-                label: kind == "gemini" ? "Gemini Models" : "Claude & GPT Models",
-                remainingPercentage: values.map(\.remaining).min() ?? 0,
-                resetTime: earliestReset(values.map(\.resetTime)),
-                durationSeconds: values.compactMap(\.duration).max()
-            )
-        }
+        return antigravityWindows(from: entries, descriptors: descriptors)
     }
 
     private static func antigravityModelWindows(
         _ models: [String: Any]
     ) -> [QuotaWindow] {
         var entries: [String: [(remaining: Double, resetTime: Date?, duration: TimeInterval?)]] = [:]
+        var descriptors: [String: (label: String, duration: TimeInterval?)] = [:]
 
         for (modelID, value) in models {
             guard let model = value as? [String: Any],
@@ -632,22 +630,47 @@ actor CLIProxyAPIQuotaClient: QuotaFetchingClient {
             ) else {
                 continue
             }
-            entries[kind, default: []].append((
+            let descriptor = antigravityWindowDescriptor(
+                quota["window"] ?? quota["window_type"] ?? model["window"] ?? "weekly"
+            )
+            let key = "\(kind)-\(descriptor.key)"
+            descriptors[key] = (descriptor.label, descriptor.duration)
+            entries[key, default: []].append((
                 remaining: clamp(fraction * 100),
                 resetTime: date(quota["resetTime"] ?? quota["reset_time"]),
-                duration: 7 * 24 * 3_600
+                duration: descriptor.duration
             ))
         }
 
-        return ["gemini", "claude-gpt"].compactMap { kind in
-            guard let values = entries[kind], !values.isEmpty else { return nil }
-            return QuotaWindow(
-                id: "antigravity-\(kind)",
-                label: kind == "gemini" ? "Gemini Models" : "Claude & GPT Models",
-                remainingPercentage: values.map(\.remaining).min() ?? 0,
-                resetTime: earliestReset(values.map(\.resetTime)),
-                durationSeconds: 7 * 24 * 3_600
-            )
+        return antigravityWindows(from: entries, descriptors: descriptors)
+    }
+
+    private static func antigravityWindows(
+        from entries: [String: [(remaining: Double, resetTime: Date?, duration: TimeInterval?)]],
+        descriptors: [String: (label: String, duration: TimeInterval?)]
+    ) -> [QuotaWindow] {
+        ["gemini", "claude-gpt"].flatMap { kind in
+            entries.keys
+                .filter { $0.hasPrefix("\(kind)-") }
+                .sorted { lhs, rhs in
+                    let lhsKey = String(lhs.dropFirst(kind.count + 1))
+                    let rhsKey = String(rhs.dropFirst(kind.count + 1))
+                    return antigravityWindowOrder(lhsKey) < antigravityWindowOrder(rhsKey)
+                }
+                .compactMap { key in
+                    guard let values = entries[key], !values.isEmpty else { return nil }
+                    let descriptor = descriptors[key]
+                        ?? (label: "Quota", duration: values.compactMap(\.duration).max())
+                    let kindLabel = kind == "gemini" ? "Gemini Models" : "Claude & GPT Models"
+                    return QuotaWindow(
+                        id: "antigravity-\(key)",
+                        label: "\(kindLabel) · \(descriptor.label)",
+                        remainingPercentage: values.map(\.remaining).min() ?? 0,
+                        resetTime: earliestReset(values.map(\.resetTime)),
+                        durationSeconds: descriptor.duration
+                            ?? values.compactMap(\.duration).max()
+                    )
+                }
         }
     }
 
@@ -671,12 +694,37 @@ actor CLIProxyAPIQuotaClient: QuotaFetchingClient {
     }
 
     private static func antigravityDuration(_ value: Any?) -> TimeInterval? {
-        guard let window = string(value)?.lowercased() else { return nil }
-        if window.contains("week") || window == "7d" { return 7 * 24 * 3_600 }
-        if window.contains("5h") || window.contains("five-hour") || window.contains("five_hour") {
-            return 5 * 3_600
+        antigravityWindowDescriptor(value).duration
+    }
+
+    private static func antigravityWindowDescriptor(
+        _ value: Any?
+    ) -> (key: String, label: String, duration: TimeInterval?) {
+        let raw = string(value)?.lowercased() ?? ""
+        if raw.contains("week") || raw.contains("7d") || raw.contains("7-day") {
+            return ("weekly", "Weekly Limit", 7 * 24 * 3_600)
         }
-        return nil
+        if raw.contains("5h") || raw.contains("5-hour") || raw.contains("5 hour")
+            || raw.contains("five-hour") || raw.contains("five_hour") {
+            return ("short", "5-hour Limit", 5 * 3_600)
+        }
+
+        let normalized = raw
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return (
+            normalized.isEmpty ? "default" : normalized,
+            string(value) ?? "Quota",
+            nil
+        )
+    }
+
+    private static func antigravityWindowOrder(_ key: String) -> Int {
+        switch key {
+        case "short": return 0
+        case "weekly": return 1
+        default: return 2
+        }
     }
 
     private static func parseKimiQuota(_ body: String) throws -> [QuotaWindow] {

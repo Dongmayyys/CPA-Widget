@@ -10,6 +10,7 @@ struct CPAWidgetEntry: TimelineEntry {
     let selectedProvider: ProviderType?
     let selectedAccountIDs: [String]
     let windowChoice: WidgetWindowChoice
+    let quotaConfiguration: WidgetQuotaConfiguration
     let warnsAboutInsecureHTTP: Bool
 
     static let placeholder = CPAWidgetEntry(
@@ -77,6 +78,7 @@ struct CPAWidgetEntry: TimelineEntry {
         selectedProvider: .codex,
         selectedAccountIDs: [],
         windowChoice: .automatic,
+        quotaConfiguration: .default,
         warnsAboutInsecureHTTP: false
     )
 }

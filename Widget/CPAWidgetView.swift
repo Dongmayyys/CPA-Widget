@@ -2,12 +2,554 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
+/// Every gallery entry uses the same independent quota-unit view. Selection
+/// happens in the timeline provider, so appearance never changes menu-bar
+/// settings or asks a provider for fresh data.
+struct CPAQuotaCollectionWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+    let entry: CPAWidgetEntry
+
+    private var summary: WidgetQuotaCollectionSummary {
+        WidgetQuotaCollectionSummary(entry: entry)
+    }
+
+    private var visibleQuotas: [WidgetQuotaSlotSummary] {
+        Array(
+            summary.slots
+                .filter { $0.summary.quota != nil }
+                .prefix(displayCapacity)
+        )
+    }
+
+    private var isSingleQuota: Bool { visibleQuotas.count == 1 }
+
+    private var displayCapacity: Int {
+        switch family {
+        case .systemSmall:
+            switch entry.quotaConfiguration.presentation {
+            case .rings, .mixed: return 2
+            case .cards, .timeline: return 3
+            }
+        case .systemMedium:
+            switch entry.quotaConfiguration.presentation {
+            case .rings, .mixed: return 4
+            case .cards, .timeline: return 2
+            }
+        case .systemLarge:
+            return 6
+        case .systemExtraLarge:
+            return 8
+        default:
+            return 2
+        }
+    }
+
+    var body: some View {
+        quotaPresentation
+    }
+
+    private var quotaPresentation: some View {
+        Group {
+            if visibleQuotas.isEmpty {
+                WidgetEmptyState(
+                    entry: entry,
+                    subtitle: entry.localized(
+                        "No matching quota. Edit a visible quota to choose a scope, provider, account or window.",
+                        "没有匹配的配额；请编辑当前显示配额的范围、服务、账号或窗口。"
+                    )
+                )
+            } else {
+                switch family {
+                case .systemSmall:
+                    smallLayout
+                case .systemLarge, .systemExtraLarge:
+                    expandedLayout
+                default:
+                    standardLayout
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var smallLayout: some View {
+        switch entry.quotaConfiguration.presentation {
+        case .rings:
+            VStack(alignment: .leading, spacing: 5) {
+                WidgetHeader(title: headerTitle, entry: entry, compact: true)
+                HStack(spacing: isSingleQuota ? 0 : 10) {
+                    ForEach(visibleQuotas) { item in
+                        WidgetQuotaRingMetric(
+                            summary: item.summary,
+                            entry: entry,
+                            diameter: isSingleQuota ? 82 : 52
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        case .cards, .timeline:
+            VStack(alignment: .leading, spacing: 5) {
+                WidgetHeader(title: headerTitle, entry: entry, compact: true)
+                ForEach(visibleQuotas) { item in
+                    WidgetDualQuotaRow(
+                        summary: item.summary,
+                        entry: entry,
+                        compact: !isSingleQuota
+                    )
+                    .frame(maxHeight: .infinity, alignment: .center)
+                }
+            }
+        case .mixed:
+            VStack(alignment: .leading, spacing: 5) {
+                WidgetHeader(title: headerTitle, entry: entry, compact: true)
+                HStack(spacing: 8) {
+                    if let ringItem = mixedRingItems.first {
+                        WidgetQuotaRingMetric(
+                            summary: ringItem.summary,
+                            entry: entry,
+                            diameter: isSingleQuota ? 82 : 54
+                        )
+                    }
+                    if let barItem = mixedBarItems.first {
+                        WidgetDualQuotaRow(
+                            summary: barItem.summary,
+                            entry: entry,
+                            compact: true
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var standardLayout: some View {
+        switch entry.quotaConfiguration.presentation {
+        case .cards:
+            VStack(alignment: .leading, spacing: 9) {
+                WidgetHeader(title: headerTitle, entry: entry)
+                HStack(spacing: 9) {
+                    ForEach(visibleQuotas) { item in
+                        WidgetDualQuotaCard(
+                            summary: item.summary,
+                            entry: entry,
+                            expanded: isSingleQuota
+                        )
+                    }
+                }
+            }
+        case .rings:
+            VStack(alignment: .leading, spacing: 8) {
+                WidgetHeader(title: headerTitle, entry: entry)
+                WidgetQuotaRingGrid(
+                    items: visibleQuotas,
+                    entry: entry,
+                    columns: visibleQuotas.count <= 2 ? visibleQuotas.count : 2,
+                    singleDiameter: 96,
+                    multipleDiameter: visibleQuotas.count <= 2 ? 76 : 50
+                )
+            }
+        case .timeline:
+            VStack(alignment: .leading, spacing: 9) {
+                WidgetHeader(title: headerTitle, entry: entry)
+                ForEach(visibleQuotas) { item in
+                    WidgetDualQuotaRow(
+                        summary: item.summary,
+                        entry: entry,
+                        expanded: isSingleQuota
+                    )
+                    .frame(maxHeight: .infinity, alignment: .center)
+                }
+            }
+        case .mixed:
+            VStack(alignment: .leading, spacing: 7) {
+                WidgetHeader(title: headerTitle, entry: entry)
+                HStack(spacing: 10) {
+                    WidgetQuotaRingGrid(
+                        items: mixedRingItems,
+                        entry: entry,
+                        columns: max(1, mixedRingItems.count),
+                        singleDiameter: 76,
+                        multipleDiameter: 52
+                    )
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 8) {
+                        ForEach(mixedBarItems) { item in
+                            WidgetDualQuotaRow(
+                                summary: item.summary,
+                                entry: entry,
+                                compact: true
+                            )
+                            .frame(maxHeight: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var expandedLayout: some View {
+        VStack(alignment: .leading, spacing: family == .systemExtraLarge ? 14 : 10) {
+            WidgetHeader(title: headerTitle, entry: entry)
+            switch entry.quotaConfiguration.presentation {
+            case .rings:
+                WidgetQuotaRingGrid(
+                    items: visibleQuotas,
+                    entry: entry,
+                    columns: expandedColumnCount,
+                    singleDiameter: ringDiameterForExpandedLayout,
+                    multipleDiameter: ringDiameterForExpandedLayout
+                )
+            case .cards:
+                LazyVGrid(columns: expandedGridColumns, spacing: 9) {
+                    ForEach(visibleQuotas) { item in
+                        WidgetDualQuotaCard(
+                            summary: item.summary,
+                            entry: entry,
+                            expanded: visibleQuotas.count <= 2
+                        )
+                    }
+                }
+            case .timeline:
+                VStack(spacing: visibleQuotas.count > 6 ? 5 : 8) {
+                    ForEach(visibleQuotas) { item in
+                        WidgetDualQuotaRow(
+                            summary: item.summary,
+                            entry: entry,
+                            compact: visibleQuotas.count > 4,
+                            expanded: visibleQuotas.count <= 4
+                        )
+                        .frame(maxHeight: .infinity, alignment: .center)
+                    }
+                }
+            case .mixed:
+                WidgetQuotaRingGrid(
+                    items: mixedRingItems,
+                    entry: entry,
+                    columns: max(1, mixedRingItems.count),
+                    singleDiameter: ringDiameterForExpandedLayout,
+                    multipleDiameter: family == .systemExtraLarge ? 68 : 62
+                )
+                .frame(height: family == .systemExtraLarge ? 94 : 86)
+                VStack(spacing: mixedBarItems.count > 4 ? 4 : 7) {
+                    ForEach(mixedBarItems) { item in
+                        WidgetDualQuotaRow(
+                            summary: item.summary,
+                            entry: entry,
+                            compact: mixedBarItems.count > 3
+                        )
+                        .frame(maxHeight: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
+    private var headerTitle: String {
+        if isSingleQuota {
+            return entry.quotaConfiguration.presentation == .timeline
+                ? entry.localized("CPA quota timeline", "CPA 配额时间线")
+                : entry.localized("CPA quota", "CPA 配额")
+        }
+        return entry.quotaConfiguration.presentation == .timeline
+            ? entry.localized("CPA quota timeline", "CPA 配额时间线")
+            : entry.localized("CPA quota", "CPA 配额")
+    }
+
+    private var ringDiameterForExpandedLayout: CGFloat {
+        if isSingleQuota {
+            return family == .systemExtraLarge ? 148 : 118
+        }
+        if visibleQuotas.count <= 2 {
+            return family == .systemExtraLarge ? 118 : 92
+        }
+        return family == .systemExtraLarge ? 78 : 66
+    }
+
+    private var expandedColumnCount: Int {
+        if isSingleQuota { return 1 }
+        if family == .systemExtraLarge { return min(4, visibleQuotas.count) }
+        return min(3, visibleQuotas.count)
+    }
+
+    private var expandedGridColumns: [GridItem] {
+        let count = family == .systemExtraLarge ? min(4, max(1, visibleQuotas.count)) : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 9), count: count)
+    }
+
+    private var mixedRingCount: Int {
+        guard visibleQuotas.count > 1 else { return visibleQuotas.count }
+        switch family {
+        case .systemSmall:
+            return 1
+        case .systemMedium:
+            return min(2, visibleQuotas.count - 1)
+        case .systemLarge:
+            return min(2, visibleQuotas.count - 1)
+        case .systemExtraLarge:
+            return min(4, visibleQuotas.count - 1)
+        default:
+            return 1
+        }
+    }
+
+    private var mixedRingItems: [WidgetQuotaSlotSummary] {
+        Array(visibleQuotas.prefix(mixedRingCount))
+    }
+
+    private var mixedBarItems: [WidgetQuotaSlotSummary] {
+        Array(visibleQuotas.dropFirst(mixedRingCount))
+    }
+}
+
+private struct WidgetQuotaChannelSummary {
+    let channel: WidgetQuotaChannel
+    let accounts: [AccountQuotaInfo]
+    let windows: [AggregatedQuotaWindow]
+    let quota: AggregatedQuotaWindow?
+    let defaultCategory: String
+
+    init(
+        channel: WidgetQuotaChannel,
+        allAccounts: [AccountQuotaInfo],
+        defaultCategory: String
+    ) {
+        self.channel = channel
+        self.accounts = channel.selectedAccounts(from: allAccounts)
+        self.windows = accounts.aggregateQuotaWindows()
+        self.defaultCategory = defaultCategory
+        self.quota = windows.resolvingSelection(channel.windowID)
+            ?? windows.first(where: { $0.category == defaultCategory })
+            ?? windows.first
+    }
+
+    var provider: ProviderType? {
+        quota?.provider ?? (channel.scope == .allAccounts ? nil : channel.provider)
+    }
+}
+
+private struct WidgetQuotaCollectionSummary {
+    let slots: [WidgetQuotaSlotSummary]
+
+    init(entry: CPAWidgetEntry) {
+        slots = entry.quotaConfiguration.channels.enumerated().map { index, channel in
+            WidgetQuotaSlotSummary(
+                slot: index + 1,
+                summary: WidgetQuotaChannelSummary(
+                    channel: channel,
+                    allAccounts: entry.accounts,
+                    defaultCategory: index == 1 ? "short" : "weekly"
+                )
+            )
+        }
+    }
+}
+
+private struct WidgetQuotaSlotSummary: Identifiable {
+    let slot: Int
+    let summary: WidgetQuotaChannelSummary
+    var id: Int { slot }
+}
+
+private struct WidgetDualQuotaCard: View {
+    let summary: WidgetQuotaChannelSummary
+    let entry: CPAWidgetEntry
+    var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: expanded ? 8 : 6) {
+            WidgetQuotaMetricHeader(summary: summary)
+            if let quota = summary.quota, let provider = summary.provider {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("\(quota.remainingPercentage)%")
+                        .font(expanded ? .title2.monospacedDigit().weight(.bold) : .title3.monospacedDigit().weight(.bold))
+                    Text(entry.language.quotaLabel(quota.label))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    ProviderLogo(provider: provider, size: expanded ? 17 : 14)
+                }
+                WidgetQuotaBar(
+                    percentage: quota.remainingPercentage,
+                    color: providerColor(provider),
+                    height: expanded ? 10 : 7
+                )
+                WidgetQuotaResetText(quota: quota, entry: entry)
+            } else {
+                WidgetQuotaUnavailableText(entry: entry)
+            }
+        }
+        .padding(expanded ? 12 : 9)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.quaternary.opacity(0.52), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct WidgetDualQuotaRow: View {
+    let summary: WidgetQuotaChannelSummary
+    let entry: CPAWidgetEntry
+    var compact = false
+    var expanded = false
+
+    var body: some View {
+        if let quota = summary.quota, let provider = summary.provider {
+            VStack(alignment: .leading, spacing: compact ? 3 : 5) {
+                HStack(spacing: 5) {
+                    ProviderLogo(provider: provider, size: compact ? 11 : 14)
+                    Text("\(provider.displayName) · \(entry.language.quotaLabel(quota.label))")
+                        .font(compact ? .caption2 : .caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text("\(quota.remainingPercentage)%")
+                        .font((compact ? Font.caption2 : Font.caption).monospacedDigit().weight(.bold))
+                }
+                if entry.quotaConfiguration.presentation == .timeline {
+                    WidgetAggregatedQuotaRaceBar(
+                        quota: quota,
+                        provider: provider,
+                        date: entry.date,
+                        height: expanded ? 11 : (compact ? 5 : 8)
+                    )
+                } else {
+                    WidgetQuotaBar(
+                        percentage: quota.remainingPercentage,
+                        color: providerColor(provider),
+                        height: expanded ? 11 : (compact ? 5 : 8)
+                    )
+                }
+                if !compact {
+                    WidgetQuotaResetText(quota: quota, entry: entry)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 5) {
+                WidgetQuotaUnavailableText(entry: entry)
+            }
+        }
+    }
+}
+
+private struct WidgetQuotaRingGrid: View {
+    let items: [WidgetQuotaSlotSummary]
+    let entry: CPAWidgetEntry
+    let columns: Int
+    let singleDiameter: CGFloat
+    let multipleDiameter: CGFloat
+
+    var body: some View {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: 8),
+                count: max(1, columns)
+            ),
+            spacing: 7
+        ) {
+            ForEach(items) { item in
+                WidgetQuotaRingMetric(
+                    summary: item.summary,
+                    entry: entry,
+                    diameter: items.count == 1 ? singleDiameter : multipleDiameter
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+}
+
+private struct WidgetQuotaRingMetric: View {
+    let summary: WidgetQuotaChannelSummary
+    let entry: CPAWidgetEntry
+    let diameter: CGFloat
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let quota = summary.quota, let provider = summary.provider {
+                QuotaRing(
+                    percentage: quota.remainingPercentage,
+                    color: providerColor(provider),
+                    diameter: diameter,
+                    lineWidth: max(6, diameter * 0.11),
+                    provider: provider
+                )
+                Text(entry.language.quotaLabel(quota.label))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.system(size: diameter * 0.4))
+                    .foregroundStyle(.secondary)
+                Text(entry.localized("Quota", "配额"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct WidgetQuotaMetricHeader: View {
+    let summary: WidgetQuotaChannelSummary
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let provider = summary.provider {
+                Text(provider.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct WidgetQuotaResetText: View {
+    let quota: AggregatedQuotaWindow
+    let entry: CPAWidgetEntry
+
+    var body: some View {
+        if let reset = quota.resetTime {
+            Text(entry.localized("Resets \(entry.language.relativeString(for: reset, relativeTo: entry.date))", "重置于 \(entry.language.relativeString(for: reset, relativeTo: entry.date))"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct WidgetQuotaUnavailableText: View {
+    let entry: CPAWidgetEntry
+
+    var body: some View {
+        Text(entry.localized("Not available", "暂无数据"))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+    }
+}
+
 struct CPAAccountQuotaWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: CPAWidgetEntry
 
+    private var displayedAccounts: [AccountQuotaInfo] {
+        let requestedIDs = Set(entry.selectedAccountIDs)
+        guard !requestedIDs.isEmpty else { return entry.accounts }
+        return entry.accounts.filter { requestedIDs.contains($0.id) }
+    }
+
     private var providerSummaries: [ProviderQuotaSummary] {
-        let grouped = Dictionary(grouping: entry.accounts, by: \.provider)
+        let grouped = Dictionary(grouping: displayedAccounts, by: \.provider)
         return grouped.compactMap { provider, accounts in
             accounts.isEmpty ? nil : ProviderQuotaSummary(provider: provider, accounts: accounts)
         }
@@ -21,7 +563,7 @@ struct CPAAccountQuotaWidgetView: View {
 
     var body: some View {
         Group {
-            if entry.accounts.isEmpty {
+            if displayedAccounts.isEmpty {
                 WidgetEmptyState(
                     entry: entry,
                     subtitle: entry.localized("Open CPA Widget, refresh once, then edit this widget.", "打开 CPA Widget 刷新一次，然后编辑此小组件。")
@@ -46,7 +588,7 @@ struct CPAAccountQuotaWidgetView: View {
             switch family {
             case .systemSmall:
                 SingleProviderRingView(summary: summary, entry: entry)
-            case .systemLarge:
+            case .systemLarge, .systemExtraLarge:
                 LargeSingleProviderView(summary: summary, entry: entry)
             default:
                 ProviderDetailView(summary: summary, entry: entry)
@@ -61,7 +603,7 @@ struct CPAAccountQuotaWidgetView: View {
         switch family {
         case .systemSmall:
             RingGridView(items: providerSummaries.prefixArray(4), entry: entry)
-        case .systemLarge:
+        case .systemLarge, .systemExtraLarge:
             DetailGridView(
                 items: providerSummaries.prefixArray(4).map(QuotaDetailItem.init),
                 entry: entry,
@@ -74,11 +616,11 @@ struct CPAAccountQuotaWidgetView: View {
 
     @ViewBuilder
     private var accountOverviewLayout: some View {
-        let ordered = entry.accounts.sorted(by: AccountQuotaInfo.displayOrder)
+        let ordered = displayedAccounts.sorted(by: AccountQuotaInfo.displayOrder)
         switch family {
         case .systemSmall:
             AccountRingGridView(accounts: ordered.prefixArray(4), entry: entry)
-        case .systemLarge:
+        case .systemLarge, .systemExtraLarge:
             DetailGridView(
                 items: ordered.prefixArray(4).map(QuotaDetailItem.init),
                 entry: entry,
@@ -94,8 +636,15 @@ struct CPAQuotaTimelineWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: CPAWidgetEntry
 
+    private var displayedAccounts: [AccountQuotaInfo] {
+        entry.accounts.selectedForWidget(
+            provider: entry.selectedProvider,
+            accountIDs: entry.selectedAccountIDs
+        )
+    }
+
     private var groups: [QuotaTimelineGroup] {
-        entry.accounts.compactMap { account in
+        displayedAccounts.compactMap { account in
             let windows = preferredWindows(for: account, choice: entry.windowChoice)
             return windows.isEmpty ? nil : QuotaTimelineGroup(account: account, windows: windows)
         }
@@ -113,6 +662,7 @@ struct CPAQuotaTimelineWidgetView: View {
         case .systemSmall: 3
         case .systemMedium: 2
         case .systemLarge: 3
+        case .systemExtraLarge: 4
         default: 2
         }
     }
@@ -126,7 +676,7 @@ struct CPAQuotaTimelineWidgetView: View {
                 )
             } else if family == .systemSmall {
                 smallLayout
-            } else if family == .systemLarge {
+            } else if family == .systemLarge || family == .systemExtraLarge {
                 largeLayout
             } else {
                 standardLayout
@@ -524,6 +1074,53 @@ private struct WidgetQuotaBar: View {
                 Capsule()
                     .fill(clamped == 0 ? Color.red : color)
                     .frame(width: clamped == 0 ? 4 : max(4, width))
+            }
+        }
+        .frame(height: height)
+    }
+}
+
+/// The dual timeline keeps the same two signals as the account timeline:
+/// dark fill is consumed quota, and the marker is the current point in the
+/// reset interval. Unlike `QuotaRaceBar`, this operates on a channel's
+/// aggregated cached window rather than an individual account window.
+private struct WidgetAggregatedQuotaRaceBar: View {
+    let quota: AggregatedQuotaWindow
+    let provider: ProviderType
+    let date: Date
+    let height: CGFloat
+
+    private var elapsed: Double {
+        guard let reset = quota.resetTime,
+              let duration = quota.durationSeconds,
+              duration > 0 else { return 0 }
+        return min(max(1 - reset.timeIntervalSince(date) / duration, 0), 1)
+    }
+
+    private var used: Double {
+        Double(min(max(100 - quota.remainingPercentage, 0), 100)) / 100
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let currentX = proxy.size.width * elapsed
+            let usedWidth = proxy.size.width * used
+            let color = providerColor(provider)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.13))
+                Capsule()
+                    .fill(color.opacity(0.22))
+                    .frame(width: max(2, currentX))
+                if used > 0 {
+                    Capsule()
+                        .fill(color.opacity(0.94))
+                        .overlay { Capsule().fill(Color.black.opacity(0.25)) }
+                        .frame(width: max(5, usedWidth))
+                }
+                Rectangle()
+                    .fill(Color.primary.opacity(0.86))
+                    .frame(width: 1.5, height: max(8, height + 4))
+                    .offset(x: min(max(currentX - 0.75, 0), max(proxy.size.width - 1.5, 0)))
             }
         }
         .frame(height: height)

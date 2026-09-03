@@ -20,7 +20,7 @@
 
 CPA Widget reads subscription quotas through the CLIProxyAPI Management API, shows each account's remaining percentage and reset windows, and brings the most useful information to the macOS menu bar and desktop. Codex is enabled by default; every other provider is optional.
 
-> Current version: v0.5.10. Requires macOS 14 Sonoma or later.
+> Current version: v0.5.11. Requires macOS 14 Sonoma or later.
 
 ## Screenshots
 
@@ -39,6 +39,7 @@ These are real Widget screenshots and contain no account identifiers.
 - Weekly, short-window, Codex Spark, and other quota windows returned by the backend.
 - A quota timeline that compares quota used with time elapsed to reveal consumption pace.
 - 5, 15, or 30-minute automatic refresh, plus manual refresh.
+- Every desktop Widget is editable. Configure 1–8 independent quotas, each with its own account scope and real quota window.
 - Two fully independent menu-bar quota channels, each with its own provider/account scope and any real quota window returned by the backend.
 - Ten menu-bar presets plus a custom composer with independent icons, percentages, bars, and inline/above/below meter information.
 - Dark Mode, SF Symbols, Dynamic Type, and native WidgetKit styling.
@@ -47,18 +48,14 @@ These are real Widget screenshots and contain no account identifiers.
 
 ## Widget layouts
 
-### Quota widget
+### Configurable quota widget
 
-- Small: one provider ring, up to four provider-average rings, or up to four account rings.
-- Medium: one provider average with two quota bars, up to four providers, or up to two account details.
-- Large: a provider and its account details, or a 2×2 grid of up to four providers/accounts.
-
-### Quota timeline widget
-
-- Small: up to three accounts with one preferred quota window each.
-- Medium: up to two account timelines.
-- Large: up to three accounts with up to two real quota windows per account.
-- Edit the Widget to choose providers, accounts, and short or weekly windows.
+- Every quota independently selects Automatic, All Accounts, one Provider, or chosen Accounts plus any real quota window present in the cache.
+- Choose 1–8 quotas. Single-quota ring mode preserves the original large-ring presentation, and arbitrary two-quota combinations remain supported.
+- Switch between quota cards, rings, quota timelines, and a mixed rings-plus-bars layout. The rendered Widget omits internal quota numbering.
+- Mix windows from the same provider or different providers—for example Kimi 5-hour + Kimi weekly, or Kimi 5-hour + Antigravity 7-day.
+- Small shows up to three bars or two rings; Medium up to two bars or four rings; Large up to six quota units; Extra Large up to eight.
+- The old static Codex-only entry has been removed; users of that entry need to add the **CPA Quota** Widget again after upgrading.
 
 Widget refresh timing is ultimately controlled by macOS and may be delayed by sleep, power conditions, or system scheduling.
 
@@ -95,8 +92,8 @@ This removes the quarantine attribute only from CPA Widget; it does not disable 
 1. Open CPA Widget, save the connection settings, and refresh all accounts once.
 2. Right-click the desktop and select **Edit Widgets**.
 3. Search for `CPA Widget`.
-4. Add a Quota or Quota Timeline Widget in Small, Medium, or Large.
-5. Right-click an added Widget and choose **Edit Widget** to select its layout, provider, accounts, and period.
+4. Add a Quota or Quota Timeline Widget in Small, Medium, Large, or Extra Large.
+5. Right-click an added Widget and choose **Edit Widget** to select its presentation, quota count, and each quota's scope, provider, accounts, and window.
 
 If a Widget says “No quota data,” refresh once in the host app, then edit or remove and re-add the Widget.
 
